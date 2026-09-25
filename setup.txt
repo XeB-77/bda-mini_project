@@ -1,0 +1,6 @@
+Setup: pip install -r requirements.txt
+
+(needs Java installed too), 
+then just python run_all.py —
+
+one command runs everything and prints your results
