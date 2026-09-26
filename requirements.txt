@@ -1,1 +1,6 @@
 pyspark>=3.4
+pandas
+matplotlib
+plotly
+streamlit
+scapy
