@@ -244,6 +244,13 @@ def plot_requests_per_minute(df):
 
     plt.figure(figsize=(15, 7))
 
+    # The underlying data is minute-level across the whole analysis period.
+    # Plotting every minute for a multi-week span produces an unreadable,
+    # overlapping tangle of lines, so aggregate to daily totals for this
+    # overview chart (the dashboard's Traffic Analysis page still offers
+    # finer, filterable time buckets interactively).
+    data["day"] = data[time_col].dt.floor("D")
+
     if ip_col is not None:
         data[ip_col] = clean_label(data[ip_col])
 
@@ -255,31 +262,39 @@ def plot_requests_per_minute(df):
         )
 
         selected = data[data[ip_col].isin(top_ips)]
+        daily = (
+            selected.groupby([ip_col, "day"], as_index=False)[count_col]
+            .sum()
+        )
 
-        for ip, group in selected.groupby(ip_col):
-            group = group.sort_values(time_col)
+        for ip, group in daily.groupby(ip_col):
+            group = group.sort_values("day")
             plt.plot(
-                group[time_col],
+                group["day"],
                 group[count_col],
                 label=ip,
-                linewidth=1.5,
+                linewidth=1.8,
+                marker="o",
+                markersize=3,
                 alpha=0.85
             )
     else:
-        data = data.groupby(time_col, as_index=False)[count_col].sum()
-        data = data.sort_values(time_col)
+        daily = data.groupby("day", as_index=False)[count_col].sum()
+        daily = daily.sort_values("day")
         plt.plot(
-            data[time_col],
-            data[count_col],
-            linewidth=1.7,
+            daily["day"],
+            daily[count_col],
+            linewidth=2,
+            marker="o",
+            markersize=3,
             label="Total requests"
         )
 
-    plt.title("Request Traffic Over Time")
-    plt.xlabel("Time")
-    plt.ylabel("Requests per minute")
+    plt.title("Daily Request Volume Over Time (Top 5 Clients)")
+    plt.xlabel("Date")
+    plt.ylabel("Requests per day")
     plt.gca().xaxis.set_major_formatter(
-        mdates.DateFormatter("%Y-%m-%d\n%H:%M")
+        mdates.DateFormatter("%Y-%m-%d")
     )
     plt.gcf().autofmt_xdate()
     plt.grid(True, alpha=0.25)
@@ -490,23 +505,123 @@ def plot_request_distribution(df):
 
 
 # ============================================================
+# CHART 7: HTTP STATUS CODE DISTRIBUTION
+# ============================================================
+
+STATUS_CATEGORY_COLORS = {
+    "2xx Success": "#2ca02c",
+    "3xx Redirect": "#1f77b4",
+    "4xx Client Error": "#ff7f0e",
+    "5xx Server Error": "#d62728",
+    "Other": "#7f7f7f",
+}
+
+
+def plot_status_distribution(df):
+    if df.empty:
+        no_data_message("Status distribution", "No status distribution data.")
+        return
+
+    status_col = find_column(df, ["status", "status_code", "http_status"])
+    category_col = find_column(df, ["status_category", "category"])
+    total_col = find_column(df, ["total", "count", "request_count"])
+
+    if status_col is None or total_col is None:
+        no_data_message(
+            "Status distribution",
+            f"Required columns missing. Found: {list(df.columns)}"
+        )
+        return
+
+    data = df.copy()
+    data[total_col] = clean_numeric(data[total_col])
+    data = data.sort_values(total_col, ascending=False)
+
+    labels = data[status_col].astype(str)
+    if category_col is not None:
+        colors = [
+            STATUS_CATEGORY_COLORS.get(cat, "#7f7f7f")
+            for cat in data[category_col]
+        ]
+    else:
+        colors = "#1f77b4"
+
+    plt.figure(figsize=(12, max(5, len(data) * 0.4)))
+    bars = plt.barh(labels, data[total_col], color=colors, edgecolor="black", linewidth=0.3)
+    plt.gca().invert_yaxis()
+    plt.xscale("log")
+    plt.title("HTTP Status Code Distribution (log scale)")
+    plt.xlabel("Number of Requests")
+    plt.ylabel("HTTP Status Code")
+
+    for bar, value in zip(bars, data[total_col]):
+        plt.text(
+            bar.get_width(),
+            bar.get_y() + bar.get_height() / 2,
+            f" {value:,.0f}",
+            va="center",
+            fontsize=9,
+        )
+
+    if category_col is not None:
+        handles = [
+            plt.Rectangle((0, 0), 1, 1, color=color)
+            for color in STATUS_CATEGORY_COLORS.values()
+        ]
+        plt.legend(
+            handles, STATUS_CATEGORY_COLORS.keys(),
+            title="Category", loc="lower right", fontsize=8
+        )
+
+    save_chart("07_status_distribution.png")
+
+
+# ============================================================
 # SUMMARY REPORT
 # ============================================================
 
-def generate_summary(suspicious, per_minute, profiles):
+def generate_summary(suspicious, per_minute, profiles, data_quality=None):
     summary_path = VISUALIZATION_DIR / "summary_report.txt"
 
     lines = [
         "WEBLOG INTRUSION ANALYSIS",
         "=" * 55,
         "",
+    ]
+
+    if data_quality is not None and not data_quality.empty:
+        row = data_quality.iloc[0]
+
+        def q(name, default=0):
+            return int(row[name]) if name in row and pd.notna(row[name]) else default
+
+        total = q("total")
+        valid = q("valid")
+        invalid = q("invalid")
+        duplicates = q("duplicates")
+        missing_ips = q("missing_ips")
+
+        lines.extend([
+            "DATA QUALITY",
+            "-" * 55,
+            f"Total raw log lines:       {total:,}",
+            f"Valid, analyzed records:   {valid:,}",
+            f"Invalid / unparsable:      {invalid:,} "
+            f"({(invalid / total * 100) if total else 0:.2f}% of total)",
+            f"  - unparsable (no host):  {missing_ips:,}",
+            f"Exact duplicate lines:     {duplicates:,} "
+            "(counted here, NOT removed from the analysis below)",
+            "",
+        ])
+
+    lines.extend([
         "VISUALIZATION SUMMARY",
         "-" * 55,
         f"Suspicious IP records: {len(suspicious):,}",
         f"IP profile records: {len(profiles):,}",
         f"Request-window records: {len(per_minute):,}",
         "",
-    ]
+    ])
 
     if not profiles.empty:
         ip_col = find_column(profiles, [
@@ -598,6 +713,12 @@ def main():
     profiles = read_spark_csv(
         REPORT_DIR / "ip_behavior_profile"
     )
+    status_distribution = read_spark_csv(
+        REPORT_DIR / "status_distribution"
+    )
+    data_quality = read_spark_csv(
+        REPORT_DIR / "data_quality"
+    )
 
     if suspicious.empty and per_minute.empty and profiles.empty:
         print("\n[ERROR] No report data was found.")
@@ -612,8 +733,9 @@ def main():
     plot_404_analysis(profiles)
     plot_ip_behavior(profiles)
     plot_request_distribution(profiles)
+    plot_status_distribution(status_distribution)
 
-    generate_summary(suspicious, per_minute, profiles)
+    generate_summary(suspicious, per_minute, profiles, data_quality)
 
     print("\n" + "=" * 65)
     print("VISUALIZATION COMPLETE")

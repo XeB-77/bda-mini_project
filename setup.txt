@@ -1,6 +1,22 @@
-Setup: pip install -r requirements.txt
+Quick setup
+===========
 
-(needs Java installed too), 
-then just python run_all.py —
+1. Prerequisites:
+   - Python 3.10–3.14
+   - Java 17 or 21 (required by Spark). Check with: java -version
 
-one command runs everything and prints your results
+2. Create and activate a virtual environment, then install dependencies:
+     python3 -m venv venv
+     source venv/bin/activate        (Windows: venv\Scripts\activate)
+     pip install -r requirements.txt
+
+3. Run the full pipeline (download -> ingest -> Spark analysis):
+     python run_all.py
+
+4. Generate the chart images and summary report:
+     python visualize_reports.py
+
+5. Launch the dashboard (needs steps 3-4 done at least once):
+     streamlit run dashboard.py
+
+See README.md for full details, troubleshooting, and what each script does.
