@@ -1,1 +1,7 @@
-pyspark>=3.4
+# Python 3.10–3.14 supported. PySpark 4.0+ is required for Python 3.12+.
+pyspark>=4.0.0
+pandas>=2.0
+matplotlib>=3.7
+plotly>=5.18
+streamlit>=1.32
+scapy>=2.5
